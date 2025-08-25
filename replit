@@ -1,42 +1,218 @@
-modules = ["nodejs-20", "web", "postgresql-16"]
-run = "npm run dev"
-hidden = [".config", ".git", "generated-icon.png", "node_modules", "dist"]
+import React, { useState, useEffect } from 'react';
 
-[nix]
-channel = "stable-24_05"
+function App() {
+  const [currentMessage, setCurrentMessage] = useState({ verse: '', reflection: '' });
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [error, setError] = useState(null);
+  const [apiKey, setApiKey] = useState('');
 
-[deployment]
-deploymentTarget = "autoscale"
-build = ["npm", "run", "build"]
-run = ["npm", "run", "start"]
+  // Pre-populated data for daily messages
+  const messages = [
+    {
+      verse: '“I am the vine; you are the branches. If you remain in me and I in you, you will bear much fruit; apart from me you can do nothing.” – John 15:5 (NIV)',
+      reflection: 'Just as a branch cannot bear fruit by itself, our lives are meant to be connected to the Source. This verse reminds us that true purpose and fulfillment come from being rooted in a relationship with God. When we lean into His strength and guidance, we find ourselves capable of things we never thought possible. Take a moment today to reconnect with the Vine through prayer and quiet reflection.'
+    },
+    {
+      verse: '“For I know the plans I have for you,” declares the Lord, “plans to prosper you and not to harm you, plans to give you hope and a future.” – Jeremiah 29:11 (NIV)',
+      reflection: 'In times of uncertainty, this promise is a beacon of hope. It assures us that our future is not defined by our current struggles, but by a divine plan full of good things. Hold on to this truth today: God’s intentions for you are always for your well-being. Trust in His perfect timing and let His hope fill your heart.'
+    },
+    {
+      verse: '“The Lord is my shepherd, I lack nothing.” – Psalm 23:1 (NIV)',
+      reflection: 'This simple yet profound statement offers immense comfort. It invites us to rest in the knowledge that when God leads, we are completely cared for. You don’t have to strive or worry about what’s next. Just like a shepherd provides for his flock, the Lord provides for you. Release your anxieties and find peace in His provision today.'
+    },
+    {
+      verse: '“Be still, and know that I am God; I will be exalted among the nations, I will be exalted in the earth.” – Psalm 46:10 (NIV)',
+      reflection: 'In a world filled with constant noise and chaos, this verse is a powerful call to stillness. It’s a reminder that true peace comes from pausing and acknowledging God’s sovereignty over everything. He doesn’t need your frantic energy or worry to accomplish His will. All He asks is for you to be still and trust in His power and ultimate victory.'
+    },
+    {
+      verse: '“But the fruit of the Spirit is love, joy, peace, forbearance, kindness, goodness, faithfulness, gentleness and self-control.” – Galatians 5:22-23 (NIV)',
+      reflection: 'The Christian journey isn’t just about what we believe, but about who we become. This passage beautifully describes the qualities that blossom in our lives as we walk with God. Consider which "fruit" you can intentionally cultivate today. Let love guide your actions, joy lift your spirit, and kindness be your response to the world.'
+    },
+    {
+      verse: '“Do not be anxious about anything, but in every situation, by prayer and petition, with thanksgiving, present your requests to God.” – Philippians 4:6 (NIV)',
+      reflection: 'Anxiety can feel overwhelming, but this verse provides a clear path forward. Instead of carrying your burdens alone, bring them to God with a thankful heart. Thanksgiving shifts our perspective from what we lack to what we have, opening the door for God’s peace to guard our hearts and minds. Practice this powerful exchange today.'
+    },
+  ];
 
-[[ports]]
-localPort = 5000
-externalPort = 80
+  // Set the initial message based on the day of the month
+  useEffect(() => {
+    const today = new Date();
+    const day = today.getDate();
+    const index = (day - 1) % messages.length;
+    setCurrentMessage(messages[index]);
+  }, []);
 
-[env]
-PORT = "5000"
+  const handleGenerateReflection = async () => {
+    setIsGenerating(true);
+    setError(null);
+    try {
+      if (!apiKey) {
+        throw new Error("Please enter your API Key to generate a new reflection.");
+      }
 
-[workflows]
-runButton = "Project"
+      const prompt = `Write a short, inspirational reflection based on the following Bible verse. The reflection should be encouraging and personal. The verse is: "${currentMessage.verse}"`;
+      
+      const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
 
-[[workflows.workflow]]
-name = "Project"
-mode = "parallel"
-author = "agent"
+      let response;
+      for (let i = 0; i < 3; i++) {
+        response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        if (response.status !== 429) break;
+        await new Promise(res => setTimeout(res, Math.pow(2, i) * 1000));
+      }
+      
+      const result = await response.json();
+      console.log('API Response:', result);
 
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "Start application"
+      if (!response.ok) {
+        let errorMessage = 'API call failed with an unexpected error.';
+        if (result && result.error && result.error.message) {
+          errorMessage = `API Error: ${result.error.message}`;
+        }
+        throw new Error(`API call failed with status: ${response.status}. ${errorMessage}`);
+      }
 
-[[workflows.workflow]]
-name = "Start application"
-author = "agent"
+      const generatedText = result?.candidates?.[0]?.content?.parts?.[0]?.text;
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "npm run dev"
-waitForPort = 5000
+      if (generatedText) {
+        setCurrentMessage(prev => ({ ...prev, reflection: generatedText }));
+      } else {
+        throw new Error("No reflection generated from API.");
+      }
+    } catch (e) {
+      console.error("Failed to generate reflection:", e);
+      setError("Failed to generate reflection. Please check your API key and try again.");
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
-[agent]
-integrations = ["javascript_gemini==1.0.0"]
+  const handleReadAloud = () => {
+    if ('speechSynthesis' in window) {
+      const text = `${currentMessage.verse}. ${currentMessage.reflection}`;
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.onend = () => {
+        setIsSpeaking(false);
+      };
+      utterance.onerror = (event) => {
+        console.error('Speech synthesis error:', event.error);
+        setIsSpeaking(false);
+      };
+      window.speechSynthesis.speak(utterance);
+      setIsSpeaking(true);
+    } else {
+      setError("Text-to-speech is not supported in your browser.");
+    }
+  };
+
+  const handleStopReading = () => {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+    }
+  };
+
+  const today = new Date().toLocaleDateString('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
+
+  return (
+    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-amber-100 to-yellow-200 text-gray-900 font-serif">
+      <div className="w-full max-w-2xl bg-white bg-opacity-80 rounded-3xl shadow-2xl p-8 transform transition-all duration-500 hover:scale-105 backdrop-filter backdrop-blur-lg border border-gray-200">
+        
+        {/* Header and Date */}
+        <header className="text-center mb-8">
+          <h1 className="text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-indigo-500 to-purple-700">
+            Daily Inspiration
+          </h1>
+          <p className="mt-2 text-xl font-light text-gray-500">{today}</p>
+        </header>
+
+        {/* API Key Input */}
+        <div className="mb-6">
+          <label htmlFor="apiKey" className="block text-sm font-medium text-gray-500 mb-1">
+            Gemini API Key (Optional)
+          </label>
+          <input
+            type="password"
+            id="apiKey"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder="Paste your API key here to generate new reflections"
+            className="block w-full bg-gray-200 border border-gray-300 rounded-lg shadow-inner p-3 text-gray-800 placeholder-gray-400 focus:ring-purple-500 focus:border-purple-500"
+          />
+        </div>
+
+        {/* Inspirational Card */}
+        <div className="relative p-8 bg-gray-50 rounded-2xl shadow-xl transition-transform transform">
+          <div className="absolute inset-0 bg-gradient-to-br from-yellow-200 to-orange-300 rounded-2xl opacity-40"></div>
+          
+          <div className="relative">
+            {/* Verse */}
+            <p className="text-2xl italic font-light text-center mb-6 text-gray-700">
+              {currentMessage.verse}
+            </p>
+            
+            {/* Reflection */}
+            <p className="text-lg leading-relaxed text-gray-800">
+              {currentMessage.reflection}
+            </p>
+          </div>
+        </div>
+
+        {/* Action Button */}
+        <div className="flex justify-center items-center mt-8 space-x-4">
+          <button
+            onClick={handleGenerateReflection}
+            disabled={isGenerating || !apiKey}
+            className={`flex items-center rounded-full px-8 py-4 text-xl font-semibold shadow-2xl transition-all duration-300 transform ${
+              isGenerating || !apiKey
+                ? 'bg-gray-400 text-gray-600 cursor-not-allowed'
+                : 'bg-gradient-to-r from-purple-500 to-indigo-600 text-white hover:scale-105 hover:shadow-inner-lg'
+            }`}
+          >
+            {isGenerating ? (
+              <>
+                <svg className="animate-spin -ml-1 mr-3 h-6 w-6 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.96l1-1.67zm12 0c-1.865-2.136-3-4.918-3-7.96h4c0 3.042-1.135 5.824-3 7.96l-1 1.67z"></path>
+                </svg>
+                Generating...
+              </>
+            ) : (
+              '✨ Get a New Reflection'
+            )}
+          </button>
+          {'speechSynthesis' in window && (
+            <button
+              onClick={isSpeaking ? handleStopReading : handleReadAloud}
+              className={`flex items-center rounded-full px-8 py-4 text-xl font-semibold shadow-2xl transition-all duration-300 transform ${
+                isSpeaking
+                  ? 'bg-red-400 text-red-900 hover:scale-105'
+                  : 'bg-green-400 text-green-900 hover:scale-105'
+              }`}
+            >
+              {isSpeaking ? '⏹️ Stop Reading' : '🔊 Read Aloud'}
+            </button>
+          )}
+        </div>
+
+        {/* Error Message */}
+        {error && (
+          <div className="mt-6 p-4 text-center text-red-700 bg-red-200 rounded-lg">
+            <p>{error}</p>
+          </div>
+        )}
+
+      </div>
+    </div>
+  );
+}
+
+export default App;
+
